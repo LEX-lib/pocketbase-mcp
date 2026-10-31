@@ -108,6 +108,7 @@ export class PocketBaseClient {
     opts: RequestOptions = {},
   ): Promise<T | Response> {
     await this.ensureLoggedIn();
+    const tokenUsed = this.token; // Track which token we're using
     const response = await this.dispatch(method, path, opts);
 
     if (
@@ -115,7 +116,13 @@ export class PocketBaseClient {
       (response.status === 401 || response.status === 403)
     ) {
       log(`got ${response.status}, refreshing superuser token`);
-      this.token = null;
+      // Only reset token if it hasn't been refreshed by another request.
+      // This prevents a race where multiple concurrent requests all get 401
+      // with the same expired token: one refreshes successfully, but the
+      // others overwrite the new token with null, triggering duplicate logins.
+      if (this.token === tokenUsed) {
+        this.token = null;
+      }
       await this.ensureLoggedIn();
       const retried = await this.dispatch(method, path, opts);
       return this.finalize<T>(retried, opts);
